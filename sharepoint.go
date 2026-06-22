@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"strings"
 
-	ondemand "example.com/sharepoint/auth/ondemand"
+	ondemand "github.com/GoncaloNevesCorreia/SharePoint-Go/auth/ondemand"
 	"github.com/koltyakov/gosip"
 	"github.com/koltyakov/gosip/api"
 )

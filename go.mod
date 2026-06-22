@@ -1,4 +1,4 @@
-module example.com/sharepoint
+module github.com/GoncaloNevesCorreia/SharePoint-Go
 
 go 1.26.4
 
