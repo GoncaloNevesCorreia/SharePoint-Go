@@ -110,7 +110,7 @@ func (list *SharePointList[T]) Get() ([]*T, error) {
 
 	list.applyLimit(items)
 
-	data, err := items.Get()
+	page, err := items.GetPaged()
 
 	list.clearFilters()
 
@@ -118,13 +118,21 @@ func (list *SharePointList[T]) Get() ([]*T, error) {
 		return nil, fmt.Errorf("Unable to fetch Lists/%s: %v\n", list.listURI, err)
 	}
 
-	var response []*T
+	return list.parseResponse(page)
+}
 
-	if err := json.Unmarshal(data.Normalized(), &response); err != nil {
-		panic(err)
+func (list *SharePointList[T]) Next() ([]*T, error) {
+	if list.page == nil {
+		return nil, fmt.Errorf("Unable to fetch next page of Lists/%s. Run the 'Get' method before 'Next'\n", list.listURI)
 	}
 
-	return response, nil
+	nextPage, err := list.page.GetNextPage()
+
+	if err != nil {
+		return nil, fmt.Errorf("Unable to fetch Lists/%s: %v\n", list.listURI, err)
+	}
+
+	return list.parseResponse(nextPage)
 }
 
 func (list *SharePointList[T]) GetByID(itemId int) (*T, error) {
@@ -298,6 +306,20 @@ func (list *SharePointList[T]) Payload(item *T, columns ...string) error {
 	}
 
 	return nil
+}
+
+func (list *SharePointList[T]) parseResponse(page *api.ItemsPage) ([]*T, error) {
+	if page.HasNextPage() {
+		list.page = page
+	}
+
+	var response []*T
+
+	if err := json.Unmarshal(page.Items.Normalized(), &response); err != nil {
+		panic(err)
+	}
+
+	return response, nil
 }
 
 func (list *SharePointList[T]) clearFilters() {

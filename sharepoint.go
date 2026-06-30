@@ -49,6 +49,7 @@ type options struct {
 
 type SharePointList[T any] struct {
 	api     *api.SP
+	page    *api.ItemsPage
 	listURI string
 	options options
 	columns map[string]string
