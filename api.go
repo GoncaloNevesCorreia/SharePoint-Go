@@ -24,6 +24,12 @@ func (list *SharePointList[T]) Columns(columns []string) *SharePointList[T] {
 	return list
 }
 
+func (list *SharePointList[T]) Limit(value int) *SharePointList[T] {
+	list.options.Limit = value
+
+	return list
+}
+
 func (list *SharePointList[T]) Equal(column string, value string) *SharePointList[T] {
 	list.setFilter(column, "eq", value)
 
