@@ -13,11 +13,6 @@ import (
 
 type ItemPayload map[string]any
 
-type SearchResponse[T any] struct {
-	HasMore bool `json:"hasMore"`
-	Items   []*T `json:"items"`
-}
-
 func (list *SharePointList[T]) Columns(columns []string) *SharePointList[T] {
 	list.options.Select = columns
 
