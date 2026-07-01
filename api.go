@@ -13,6 +13,11 @@ import (
 
 type ItemPayload map[string]any
 
+type SearchResponse[T any] struct {
+	HasMore bool `json:"hasMore"`
+	Items   []*T `json:"items"`
+}
+
 func (list *SharePointList[T]) Columns(columns []string) *SharePointList[T] {
 	list.options.Select = columns
 
@@ -97,7 +102,7 @@ func (list *SharePointList[T]) OrderByDesc(column string) *SharePointList[T] {
 	return list
 }
 
-func (list *SharePointList[T]) Get() ([]*T, error) {
+func (list *SharePointList[T]) Get() (*SearchResponse[T], error) {
 	list.validateOptions()
 
 	items := list.getItems()
@@ -121,7 +126,7 @@ func (list *SharePointList[T]) Get() ([]*T, error) {
 	return list.parseResponse(page)
 }
 
-func (list *SharePointList[T]) Next() ([]*T, error) {
+func (list *SharePointList[T]) Next() (*SearchResponse[T], error) {
 	if list.page == nil {
 		return nil, fmt.Errorf("Unable to fetch next page of Lists/%s. Run the 'Get' method before 'Next'\n", list.listURI)
 	}
@@ -308,18 +313,23 @@ func (list *SharePointList[T]) Payload(item *T, columns ...string) error {
 	return nil
 }
 
-func (list *SharePointList[T]) parseResponse(page *api.ItemsPage) ([]*T, error) {
+func (list *SharePointList[T]) parseResponse(page *api.ItemsPage) (*SearchResponse[T], error) {
 	if page.HasNextPage() {
 		list.page = page
+	} else {
+		list.page = nil
 	}
 
-	var response []*T
+	var items []*T
 
-	if err := json.Unmarshal(page.Items.Normalized(), &response); err != nil {
+	if err := json.Unmarshal(page.Items.Normalized(), &items); err != nil {
 		panic(err)
 	}
 
-	return response, nil
+	return &SearchResponse[T]{
+		HasMore: list.page != nil,
+		Items:   items,
+	}, nil
 }
 
 func (list *SharePointList[T]) clearFilters() {
