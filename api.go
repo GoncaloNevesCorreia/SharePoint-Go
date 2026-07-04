@@ -108,6 +108,27 @@ func (list *SharePointList[T]) OrderByDesc(column string) *SharePointList[T] {
 	return list
 }
 
+func (list *SharePointList[T]) GetAll() ([]*T, error) {
+	items := list.getItems()
+
+	result, err := items.GetAll()
+
+	if err != nil {
+		return nil, err
+	}
+
+	var response []*T
+
+	for _, data := range result {
+
+		if err := json.Unmarshal(data.Normalized(), &response); err != nil {
+			return nil, err
+		}
+	}
+
+	return response, nil
+}
+
 func (list *SharePointList[T]) Get() (*SearchResponse[T], error) {
 	list.validateOptions()
 
@@ -159,7 +180,7 @@ func (list *SharePointList[T]) GetByID(itemId int) (*T, error) {
 	var response *T
 
 	if err := json.Unmarshal(data.Normalized(), &response); err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	return response, nil
@@ -185,7 +206,7 @@ func (list *SharePointList[T]) Add() (*T, error) {
 	var response *T
 
 	if err := json.Unmarshal(data.Normalized(), &response); err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	return response, nil
@@ -313,6 +334,7 @@ func (list *SharePointList[T]) Payload(item *T, columns ...string) error {
 
 		value := reflectValue.Elem().FieldByName(key)
 
+		// TODO: Just Set the Value without formatting.
 		list.payload[key] = fmt.Sprintf("%v", value)
 	}
 
@@ -329,7 +351,7 @@ func (list *SharePointList[T]) parseResponse(page *api.ItemsPage) (*SearchRespon
 	var items []*T
 
 	if err := json.Unmarshal(page.Items.Normalized(), &items); err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	return &SearchResponse[T]{
