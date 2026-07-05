@@ -9,13 +9,9 @@ import (
 
 func (list *SharePointList[T]) validateOptions() {
 
-	if err := list.validateColums(list.options.Select); err != nil {
-		panic(err)
-	}
+	list.validateColums(list.options.Select)
 
-	if err := list.validateFilters(); err != nil {
-		panic(err)
-	}
+	list.validateFilters()
 }
 
 func (list *SharePointList[T]) validatePayload() {
@@ -25,15 +21,13 @@ func (list *SharePointList[T]) validatePayload() {
 		panic(fmt.Errorf("No Columns found in item used to update List '%v'.", list.listURI))
 	}
 
-	if err := list.validateColums(payloadKeys); err != nil {
-		panic(err)
-	}
+	list.validateColums(payloadKeys)
 }
 
-func (list *SharePointList[T]) validateColums(columns []string) error {
+func (list *SharePointList[T]) validateColums(columns []string) {
 
 	if len(columns) == 0 {
-		return nil
+		return
 	}
 
 	jsonColumns := slices.Collect(maps.Keys(list.columns))
@@ -48,16 +42,15 @@ func (list *SharePointList[T]) validateColums(columns []string) error {
 	}
 
 	if len(notFoundColumns) == 0 {
-		return nil
+		return
 	}
 
 	t := reflect.TypeFor[T]()
 
-	return fmt.Errorf("Columns %v not found in struct '%s' used to represent List '%v'", notFoundColumns, t.Name(), list.listURI)
-
+	panic(fmt.Errorf("Columns %v not found in struct '%s' used to represent List '%v'", notFoundColumns, t.Name(), list.listURI))
 }
 
-func (list *SharePointList[T]) validateFilters() error {
+func (list *SharePointList[T]) validateFilters() {
 	columns := make([]string, 0)
 
 	size := len(list.options.Filters)
@@ -74,17 +67,13 @@ func (list *SharePointList[T]) validateFilters() error {
 		}
 
 		if i == size-1 && filter.logicalOp != "" {
-			return fmt.Errorf("Trailing Logical Operator '%s' Filter for Column %v in struct '%s' used to represent List '%v'", filter.logicalOp, missingLogicalOpColumns, t.Name(), list.listURI)
+			panic(fmt.Errorf("Trailing Logical Operator '%s' Filter for Column %v in struct '%s' used to represent List '%v'", filter.logicalOp, missingLogicalOpColumns, t.Name(), list.listURI))
 		}
 	}
 
 	if len(missingLogicalOpColumns) != 0 {
-		return fmt.Errorf("Missing Logical Operator Filters for Columns %v in struct '%s' used to represent List '%v'", missingLogicalOpColumns, t.Name(), list.listURI)
+		panic(fmt.Errorf("Missing Logical Operator Filters for Columns %v in struct '%s' used to represent List '%v'", missingLogicalOpColumns, t.Name(), list.listURI))
 	}
 
-	if err := list.validateColums(columns); err != nil {
-		return err
-	}
-
-	return nil
+	list.validateColums(columns)
 }

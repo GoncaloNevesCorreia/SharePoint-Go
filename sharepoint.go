@@ -57,11 +57,7 @@ type SharePointList[T any] struct {
 }
 
 func NewEndpoint[T any](sp *api.SP, listURI string) *SharePointList[T] {
-	columns, err := getColumns[T]()
-
-	if err != nil {
-		panic(err)
-	}
+	columns := getColumns[T]()
 
 	return &SharePointList[T]{
 		api:     sp,
@@ -73,11 +69,11 @@ func NewEndpoint[T any](sp *api.SP, listURI string) *SharePointList[T] {
 
 }
 
-func getColumns[T any]() (map[string]string, error) {
+func getColumns[T any]() map[string]string {
 	t := reflect.TypeFor[T]()
 
 	if t.Kind() != reflect.Struct {
-		return nil, fmt.Errorf("%s must be a struct", t.Name())
+		panic(fmt.Errorf("%s must be a struct", t.Name()))
 	}
 
 	columns := map[string]string{}
@@ -98,8 +94,8 @@ func getColumns[T any]() (map[string]string, error) {
 	}
 
 	if len(columns) == 0 {
-		return nil, fmt.Errorf("No Columns found in struct '%s'. Please include the missing json tags", t.Name())
+		panic(fmt.Errorf("No Columns found in struct '%s'. Please include the missing json tags", t.Name()))
 	}
 
-	return columns, nil
+	return columns
 }
