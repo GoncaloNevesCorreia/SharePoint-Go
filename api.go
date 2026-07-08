@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/koltyakov/gosip/api"
 )
@@ -18,17 +19,6 @@ type SearchResponse[T any] struct {
 	Items   []*T `json:"items"`
 }
 
-type Result[T any] struct {
-	Success bool
-	Data    T
-	Error   *ApiError
-}
-
-type ApiError struct {
-	Code    string
-	Message string
-}
-
 func (list *SharePointList[T]) Columns(columns []string) *SharePointList[T] {
 	list.options.Select = columns
 
@@ -36,7 +26,14 @@ func (list *SharePointList[T]) Columns(columns []string) *SharePointList[T] {
 }
 
 func (list *SharePointList[T]) Limit(value int) *SharePointList[T] {
-	list.options.Limit = value
+	list.options.Limit.enabled = true
+	list.options.Limit.value = value
+
+	return list
+}
+
+func (list *SharePointList[T]) NoLimit() *SharePointList[T] {
+	list.options.Limit.enabled = false
 
 	return list
 }
@@ -119,41 +116,31 @@ func (list *SharePointList[T]) OrderByDesc(column string) *SharePointList[T] {
 	return list
 }
 
-func (list *SharePointList[T]) GetAll() Result[[]*T] {
+func (list *SharePointList[T]) GetAll() ([]*T, error) {
 	items := list.getItems()
 
 	result, err := items.GetAll()
 
 	if err != nil {
-		return Result[[]*T]{
-			Error: &ApiError{
-				Code:    "fetch_error",
-				Message: fmt.Sprintf("Não foi possivel aceder à lista '%s': %v\n", list.listURI, err),
-			},
-		}
+		return nil, fmt.Errorf("Não foi possivel aceder à lista '%s': %v\n", list.listURI, err)
 	}
 
-	var response []*T
+	response := make([]*T, 0, len(result))
 
 	for _, data := range result {
 
-		if err := json.Unmarshal(data.Normalized(), &response); err != nil {
-			return Result[[]*T]{
-				Error: &ApiError{
-					Code:    "parse_error",
-					Message: err.Error(),
-				},
-			}
-		}
-	}
+		var item *T
 
-	return Result[[]*T]{
-		Success: true,
-		Data:    response,
+		if err := json.Unmarshal(data.Normalized(), &item); err != nil {
+			return nil, err
+		}
+
+		response = append(response, item)
 	}
+	return response, nil
 }
 
-func (list *SharePointList[T]) Get() Result[*SearchResponse[T]] {
+func (list *SharePointList[T]) Get() (*SearchResponse[T], error) {
 	list.validateOptions()
 
 	items := list.getItems()
@@ -171,85 +158,56 @@ func (list *SharePointList[T]) Get() Result[*SearchResponse[T]] {
 	list.clearFilters()
 
 	if err != nil {
-		return Result[*SearchResponse[T]]{
-			Error: &ApiError{
-				Code:    "fetch_error",
-				Message: fmt.Sprintf("Não foi possivel aceder à lista '%s': %v\n", list.listURI, err),
-			},
-		}
+		return nil, fmt.Errorf("Não foi possivel aceder à lista '%s': %v\n", list.listURI, err)
 	}
 
 	return list.parseResponse(page)
 }
 
-func (list *SharePointList[T]) Next() Result[*SearchResponse[T]] {
+func (list *SharePointList[T]) Next() (*SearchResponse[T], error) {
 	if list.page == nil {
-		return Result[*SearchResponse[T]]{
-			Error: &ApiError{
-				Code:    "api_no_page",
-				Message: fmt.Sprintf("Não foi possivel obter a proxima pagina da lista '%s'.\n", list.listURI),
-			},
-		}
+		return nil, fmt.Errorf("Não foi possivel obter a proxima pagina da lista '%s'.\n", list.listURI)
 	}
 
 	nextPage, err := list.page.GetNextPage()
 
 	if err != nil {
-		return Result[*SearchResponse[T]]{
-			Error: &ApiError{
-				Code:    "fetch_error",
-				Message: fmt.Sprintf("Não foi possivel aceder à lista '%s': %v\n", list.listURI, err),
-			},
-		}
+		return nil, fmt.Errorf("Não foi possivel aceder à lista '%s': %v\n", list.listURI, err)
 	}
 
 	return list.parseResponse(nextPage)
 }
 
-func (list *SharePointList[T]) GetByID(itemId int) Result[*T] {
+func (list *SharePointList[T]) GetByID(itemId int) (*T, error) {
 
 	items := list.getItems()
 
 	data, err := items.GetByID(itemId).Get()
 
 	if err != nil {
-		return Result[*T]{
-			Error: &ApiError{
-				Code:    "fetch_error",
-				Message: fmt.Sprintf("Não foi possivel aceder à lista '%s': %v\n", list.listURI, err),
-			},
+		if strings.HasPrefix(err.Error(), "unable to request api: 404 Not Found") {
+			return nil, nil
 		}
+
+		return nil, fmt.Errorf("Não foi possivel aceder à lista '%s': %v\n", list.listURI, err)
 	}
 
 	var response *T
 
 	if err := json.Unmarshal(data.Normalized(), &response); err != nil {
-		return Result[*T]{
-			Error: &ApiError{
-				Code:    "parse_error",
-				Message: err.Error(),
-			},
-		}
+		return nil, err
 	}
 
-	return Result[*T]{
-		Success: true,
-		Data:    response,
-	}
+	return response, nil
 }
 
-func (list *SharePointList[T]) Add() Result[*T] {
+func (list *SharePointList[T]) Add() (*T, error) {
 	list.validatePayload()
 
 	payload, err := json.Marshal(list.payload)
 
 	if err != nil {
-		return Result[*T]{
-			Error: &ApiError{
-				Code:    "parse_error",
-				Message: err.Error(),
-			},
-		}
+		return nil, err
 	}
 
 	items := list.getItems()
@@ -257,43 +215,25 @@ func (list *SharePointList[T]) Add() Result[*T] {
 	data, err := items.Add(payload)
 
 	if err != nil {
-		return Result[*T]{
-			Error: &ApiError{
-				Code:    "add_error",
-				Message: fmt.Sprintf("Não foi possivel adicionar à lista '%s': %v\n", list.listURI, err),
-			},
-		}
+		return nil, fmt.Errorf("Não foi possivel adicionar à lista '%s': %v\n", list.listURI, err)
 	}
 
 	var response *T
 
 	if err := json.Unmarshal(data.Normalized(), &response); err != nil {
-		return Result[*T]{
-			Error: &ApiError{
-				Code:    "parse_error",
-				Message: err.Error(),
-			},
-		}
+		return nil, err
 	}
 
-	return Result[*T]{
-		Success: true,
-		Data:    response,
-	}
+	return response, nil
 }
 
-func (list *SharePointList[T]) Update(itemId int) Result[bool] {
+func (list *SharePointList[T]) Update(itemId int) error {
 	list.validatePayload()
 
 	payload, err := json.Marshal(list.payload)
 
 	if err != nil {
-		return Result[bool]{
-			Error: &ApiError{
-				Code:    "parse_error",
-				Message: err.Error(),
-			},
-		}
+		return err
 	}
 
 	items := list.getItems()
@@ -301,28 +241,16 @@ func (list *SharePointList[T]) Update(itemId int) Result[bool] {
 	_, err = items.GetByID(itemId).Update(payload)
 
 	if err != nil {
-		return Result[bool]{
-			Error: &ApiError{
-				Code:    "update_error",
-				Message: fmt.Sprintf("Não foi possivel atualizar a lista '%s': %v\n", list.listURI, err),
-			},
-		}
+		return fmt.Errorf("Não foi possivel atualizar a lista '%s': %v\n", list.listURI, err)
+
 	}
 
-	return Result[bool]{
-		Success: true,
-		Data:    true,
-	}
+	return nil
 }
 
-func (list *SharePointList[T]) Delete(itemId int) Result[bool] {
+func (list *SharePointList[T]) Delete(itemId int) error {
 	if itemId <= 0 {
-		return Result[bool]{
-			Error: &ApiError{
-				Code:    "delete_error",
-				Message: fmt.Sprintf("Precisa de especificar um itemID para apagar da Lista: %s\n", list.listURI),
-			},
-		}
+		return fmt.Errorf("Precisa de especificar um itemID para apagar da Lista: %s\n", list.listURI)
 	}
 
 	items := list.getItems()
@@ -330,19 +258,14 @@ func (list *SharePointList[T]) Delete(itemId int) Result[bool] {
 	err := items.GetByID(itemId).Delete()
 
 	if err != nil {
-		return Result[bool]{
-			Error: &ApiError{
-				Code:    "delete_error",
-				Message: fmt.Sprintf("Não foi possivel apagar da lista '%s': %v\n", list.listURI, err),
-			},
+		if strings.HasPrefix(err.Error(), "unable to request api: 404 Not Found") {
+			return nil
 		}
+
+		return fmt.Errorf("Não foi possivel apagar da lista '%s': %v\n", list.listURI, err)
 	}
 
-	return Result[bool]{
-		Success: true,
-		Data:    true,
-	}
-
+	return nil
 }
 
 func (list *SharePointList[T]) getItems() *api.Items {
@@ -404,12 +327,16 @@ func (list *SharePointList[T]) applyOrderBy(items *api.Items) {
 }
 
 func (list *SharePointList[T]) applyLimit(items *api.Items) {
-	if list.options.Limit <= 0 {
+	if !list.options.Limit.enabled {
+		return
+	}
+
+	if list.options.Limit.value <= 0 {
 		items.Top(10)
 		return
 	}
 
-	items.Top(list.options.Limit)
+	items.Top(list.options.Limit.value)
 }
 
 func (list *SharePointList[T]) setFilter(column string, op string, value string) {
@@ -431,7 +358,7 @@ func (list *SharePointList[T]) setLogicalOperator(logicalOp string) {
 func (list *SharePointList[T]) Payload(item *T, columns ...string) {
 	t := reflect.TypeFor[T]()
 
-	list.payload = ItemPayload{}
+	list.ClearPayload()
 
 	for _, column := range columns {
 		key, ok := list.columns[column]
@@ -444,12 +371,20 @@ func (list *SharePointList[T]) Payload(item *T, columns ...string) {
 
 		value := reflectValue.Elem().FieldByName(key)
 
-		// TODO: Just Set the Value without formatting.
-		list.payload[key] = fmt.Sprintf("%v", value)
+		if isTime(value.Type()) {
+			list.payload[column] = value.Interface().(time.Time).Format(time.RFC3339)
+		} else {
+			list.payload[column] = fmt.Sprintf("%v", value)
+		}
+
 	}
 }
 
-func (list *SharePointList[T]) parseResponse(page *api.ItemsPage) Result[*SearchResponse[T]] {
+func (list *SharePointList[T]) ClearPayload() {
+	list.payload = ItemPayload{}
+}
+
+func (list *SharePointList[T]) parseResponse(page *api.ItemsPage) (*SearchResponse[T], error) {
 	if page.HasNextPage() {
 		list.page = page
 	} else {
@@ -459,21 +394,14 @@ func (list *SharePointList[T]) parseResponse(page *api.ItemsPage) Result[*Search
 	var items []*T
 
 	if err := json.Unmarshal(page.Items.Normalized(), &items); err != nil {
-		return Result[*SearchResponse[T]]{
-			Error: &ApiError{
-				Code:    "parse_error",
-				Message: err.Error(),
-			},
-		}
+		return nil, err
 	}
 
-	return Result[*SearchResponse[T]]{
-		Success: true,
-		Data: &SearchResponse[T]{
-			HasMore: list.page != nil,
-			Items:   items,
-		},
-	}
+	return &SearchResponse[T]{
+		HasMore: list.page != nil,
+		Items:   items,
+	}, nil
+
 }
 
 func (list *SharePointList[T]) clearFilters() {
@@ -482,4 +410,10 @@ func (list *SharePointList[T]) clearFilters() {
 	}
 
 	list.options.Filters = nil
+}
+
+func isTime(t reflect.Type) bool {
+	tTimeDuration := reflect.TypeFor[time.Time]()
+
+	return t == tTimeDuration
 }

@@ -40,11 +40,16 @@ type orderBy struct {
 	ascending bool
 }
 
+type limit struct {
+	value   int
+	enabled bool
+}
+
 type options struct {
 	Select  []string
 	Filters []*filter
 	OrderBy *orderBy
-	Limit   int
+	Limit   limit
 }
 
 type SharePointList[T any] struct {
@@ -63,7 +68,12 @@ func NewEndpoint[T any](sp *api.SP, listURI string) *SharePointList[T] {
 		api:     sp,
 		listURI: listURI,
 		columns: columns,
-		options: options{},
+		options: options{
+			Limit: limit{
+				value:   10,
+				enabled: true,
+			},
+		},
 		payload: ItemPayload{},
 	}
 

@@ -85,7 +85,7 @@ func (c *AuthCnfg) loadCookies(parent context.Context) (*Cookies, error) {
 
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.ExecPath(edge),
-		chromedp.Flag("headless", false),
+		chromedp.Flag("headless", true),
 	)
 
 	allocCtx, cancelAlloc := chromedp.NewExecAllocator(parent, opts...)
@@ -94,7 +94,7 @@ func (c *AuthCnfg) loadCookies(parent context.Context) (*Cookies, error) {
 	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
 
-	ctx, cancelTimeout := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancelTimeout := context.WithTimeout(ctx, 60*time.Second)
 	defer cancelTimeout()
 
 	foundCookies := Cookies{}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/chromedp/cdproto/network"
@@ -35,7 +36,7 @@ func (cookies *Cookies) isEmpty() bool {
 func (cookies *Cookies) isExpired() bool {
 	for _, check := range cookieNames {
 		for _, cookie := range *cookies {
-			if cookie.Name == check {
+			if strings.ToLower(cookie.Name) == check {
 				if cookie.isExpired() {
 					return true
 				}
@@ -52,7 +53,7 @@ func (cookies *Cookies) getExpire() int64 {
 	var exp int64 = -1
 	for _, check := range cookieNames {
 		for _, cookie := range *cookies {
-			if cookie.Name == check {
+			if strings.ToLower(cookie.Name) == check {
 				e := cookie.getExpire()
 				if exp == -1 || e < exp {
 					exp = e
@@ -81,8 +82,8 @@ func (cookie *Cookie) getExpire() int64 {
 	return expireTime.Unix()
 }
 
-func (cookie *Cookie) toMap() map[string]interface{} {
-	res := map[string]interface{}{}
+func (cookie *Cookie) toMap() map[string]any {
+	res := map[string]any{}
 	raw, _ := json.Marshal(cookie)
 	_ = json.Unmarshal(raw, &res)
 	return res
