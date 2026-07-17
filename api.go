@@ -1,6 +1,7 @@
 package sharepoint
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/koltyakov/gosip"
 	"github.com/koltyakov/gosip/api"
 )
 
@@ -119,7 +121,9 @@ func (list *SharePointList[T]) OrderByDesc(column string) *SharePointList[T] {
 func (list *SharePointList[T]) GetAll() ([]*T, error) {
 	items := list.getItems()
 
-	result, err := items.GetAll()
+	result, err := withRetry(func() ([]api.ItemResp, error) {
+		return items.GetAll()
+	})
 
 	if err != nil {
 		return nil, fmt.Errorf("Não foi possivel aceder à lista '%s': %v\n", list.listURI, err)
@@ -140,6 +144,34 @@ func (list *SharePointList[T]) GetAll() ([]*T, error) {
 	return response, nil
 }
 
+func (list *SharePointList[T]) GetAllPaged() ([]*T, error) {
+	items := make([]*T, 0)
+
+	response, err := withRetry(func() (*SearchResponse[T], error) {
+		return list.Limit(50).Get()
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if len(response.Items) == 0 {
+		return items, nil
+	}
+
+	items = append(items, response.Items...)
+
+	for {
+		if !response.HasMore {
+			return items, nil
+		}
+
+		response, err = list.Next()
+
+		items = append(items, response.Items...)
+	}
+}
+
 func (list *SharePointList[T]) Get() (*SearchResponse[T], error) {
 	list.validateOptions()
 
@@ -153,12 +185,20 @@ func (list *SharePointList[T]) Get() (*SearchResponse[T], error) {
 
 	list.applyLimit(items)
 
-	page, err := items.GetPaged()
+	page, err := withRetry(func() (*api.ItemsPage, error) {
+		return items.GetPaged()
+	})
 
 	list.clearFilters()
 
 	if err != nil {
 		return nil, fmt.Errorf("Não foi possivel aceder à lista '%s': %v\n", list.listURI, err)
+	}
+
+	if len(page.Items) == 0 {
+		return &SearchResponse[T]{
+			HasMore: false,
+		}, nil
 	}
 
 	return list.parseResponse(page)
@@ -169,10 +209,18 @@ func (list *SharePointList[T]) Next() (*SearchResponse[T], error) {
 		return nil, fmt.Errorf("Não foi possivel obter a proxima pagina da lista '%s'.\n", list.listURI)
 	}
 
-	nextPage, err := list.page.GetNextPage()
+	nextPage, err := withRetry(func() (*api.ItemsPage, error) {
+		return list.page.GetNextPage()
+	})
 
 	if err != nil {
 		return nil, fmt.Errorf("Não foi possivel aceder à lista '%s': %v\n", list.listURI, err)
+	}
+
+	if len(nextPage.Items) == 0 {
+		return &SearchResponse[T]{
+			HasMore: false,
+		}, nil
 	}
 
 	return list.parseResponse(nextPage)
@@ -182,14 +230,16 @@ func (list *SharePointList[T]) GetByID(itemId int) (*T, error) {
 
 	items := list.getItems()
 
-	data, err := items.GetByID(itemId).Get()
+	data, err := withRetry(func() (api.ItemResp, error) {
+		return items.GetByID(itemId).Get()
+	})
 
 	if err != nil {
-		if strings.HasPrefix(err.Error(), "unable to request api: 404 Not Found") {
-			return nil, nil
-		}
-
 		return nil, fmt.Errorf("Não foi possivel aceder à lista '%s': %v\n", list.listURI, err)
+	}
+
+	if len(data) == 0 {
+		return nil, nil
 	}
 
 	var response *T
@@ -199,6 +249,25 @@ func (list *SharePointList[T]) GetByID(itemId int) (*T, error) {
 	}
 
 	return response, nil
+}
+
+func (list *SharePointList[T]) GetFile(itemId int, fileName string) ([]byte, error) {
+
+	items := list.getItems()
+
+	data, err := withRetry(func() ([]byte, error) {
+		return items.GetByID(itemId).Attachments().GetByName(fileName).Download()
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("Não foi possivel aceder à lista '%s': %v\n", list.listURI, err)
+	}
+
+	if len(data) == 0 {
+		return nil, nil
+	}
+
+	return data, nil
 }
 
 func (list *SharePointList[T]) Add() (*T, error) {
@@ -212,7 +281,9 @@ func (list *SharePointList[T]) Add() (*T, error) {
 
 	items := list.getItems()
 
-	data, err := items.Add(payload)
+	data, err := withRetry(func() (api.ItemResp, error) {
+		return items.Add(payload)
+	})
 
 	if err != nil {
 		return nil, fmt.Errorf("Não foi possivel adicionar à lista '%s': %v\n", list.listURI, err)
@@ -222,6 +293,29 @@ func (list *SharePointList[T]) Add() (*T, error) {
 
 	if err := json.Unmarshal(data.Normalized(), &response); err != nil {
 		return nil, err
+	}
+
+	if list.attachment != nil {
+		v := reflect.ValueOf(response).Elem()
+		f := v.FieldByName("ID")
+
+		if f.IsValid() && f.CanSet() && f.Kind() == reflect.Int {
+			id := f.Interface().(int)
+
+			item := items.GetByID(id).Attachments()
+
+			file := list.attachment
+
+			item.GetByName(file.Name).Delete()
+
+			content := bytes.NewReader(file.Content)
+
+			_, err := item.Add(file.Name, content)
+
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	return response, nil
@@ -236,36 +330,77 @@ func (list *SharePointList[T]) Update(itemId int) error {
 		return err
 	}
 
-	items := list.getItems()
+	item := list.getItems().GetByID(itemId)
 
-	_, err = items.GetByID(itemId).Update(payload)
+	_, err = withRetry(func() (api.ItemResp, error) {
+		return item.Update(payload)
+	})
 
 	if err != nil {
 		return fmt.Errorf("Não foi possivel atualizar a lista '%s': %v\n", list.listURI, err)
+	}
 
+	if list.attachment != nil {
+
+		file := list.attachment
+
+		item.Attachments().GetByName(file.Name).Delete()
+
+		content := bytes.NewReader(file.Content)
+
+		_, err := item.Attachments().Add(file.Name, content)
+
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
 }
 
-func (list *SharePointList[T]) Delete(itemId int) error {
+func (list *SharePointList[T]) Delete(itemId int) (string, error) {
 	if itemId <= 0 {
-		return fmt.Errorf("Precisa de especificar um itemID para apagar da Lista: %s\n", list.listURI)
+		return "", fmt.Errorf("Precisa de especificar um itemID para apagar da Lista: %s\n", list.listURI)
 	}
 
 	items := list.getItems()
 
-	err := items.GetByID(itemId).Delete()
+	endpoint := items.GetByID(itemId).ToURL()
+
+	endpoint = fmt.Sprintf("%s/Recycle", endpoint)
+
+	httpClient := api.NewHTTPClient(list.client)
+
+	data, err := withRetry(func() ([]byte, error) {
+		return httpClient.Post(endpoint, nil, nil)
+	})
 
 	if err != nil {
-		if strings.HasPrefix(err.Error(), "unable to request api: 404 Not Found") {
-			return nil
-		}
-
-		return fmt.Errorf("Não foi possivel apagar da lista '%s': %v\n", list.listURI, err)
+		return "", fmt.Errorf("Não foi possivel apagar da lista '%s': %v\n", list.listURI, err)
 	}
 
-	return nil
+	var raw map[string]any
+
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return "", err
+	}
+
+	if d, ok := raw["d"].(map[string]any); ok {
+		if v, ok := d["Recycle"].(string); ok && v != "" {
+			return v, nil
+		}
+		if v, ok := d["recycle"].(string); ok && v != "" {
+			return v, nil
+		}
+	}
+
+	return "", nil
+}
+
+func (list *SharePointList[T]) Restore(GUID string) error {
+	return withRetryNoData(func() error {
+		return list.api.Web().RecycleBin().GetByID(GUID).Restore()
+	})
 }
 
 func (list *SharePointList[T]) getItems() *api.Items {
@@ -355,6 +490,52 @@ func (list *SharePointList[T]) setLogicalOperator(logicalOp string) {
 	lastFilter.logicalOp = logicalOp
 }
 
+func (list *SharePointList[T]) SetFile(name string, content any) error {
+	byteValue, err := json.Marshal(content)
+
+	if err != nil {
+		return err
+	}
+
+	list.attachment = &File{
+		Name:    name,
+		Content: byteValue,
+	}
+
+	return nil
+}
+
+func (list *SharePointList[T]) GetUserData() UserMetadata {
+	return *list.user
+}
+
+func GetSessionMetadata(siteURL string, client *gosip.SPClient) (*UserMetadata, error) {
+
+	endpoint := fmt.Sprintf("%s/_api/SP.Directory.DirectorySession/me?$select=id,displayName,mail", siteURL)
+
+	httpClient := api.NewHTTPClient(client)
+
+	data, err := withRetry(func() ([]byte, error) {
+		return httpClient.Post(endpoint, nil, nil)
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	var userResponse struct {
+		D UserMetadata `json:"d"`
+	}
+
+	if err := json.Unmarshal(data, &userResponse); err != nil {
+		return nil, err
+	}
+
+	user := userResponse.D
+
+	return &user, nil
+}
+
 func (list *SharePointList[T]) Payload(item *T, columns ...string) {
 	t := reflect.TypeFor[T]()
 
@@ -376,12 +557,12 @@ func (list *SharePointList[T]) Payload(item *T, columns ...string) {
 		} else {
 			list.payload[column] = fmt.Sprintf("%v", value)
 		}
-
 	}
 }
 
 func (list *SharePointList[T]) ClearPayload() {
 	list.payload = ItemPayload{}
+	list.attachment = nil
 }
 
 func (list *SharePointList[T]) parseResponse(page *api.ItemsPage) (*SearchResponse[T], error) {
