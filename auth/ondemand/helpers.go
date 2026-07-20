@@ -86,6 +86,9 @@ func (c *AuthCnfg) loadCookies(parent context.Context) (*Cookies, error) {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.ExecPath(edge),
 		chromedp.Flag("headless", true),
+		// chromedp.Flag("disable-gpu", true),
+		// chromedp.Flag("no-sandbox", true),
+		chromedp.UserDataDir(filepath.Join(os.TempDir(), "chromedp-auth-profile")),
 	)
 
 	allocCtx, cancelAlloc := chromedp.NewExecAllocator(parent, opts...)
