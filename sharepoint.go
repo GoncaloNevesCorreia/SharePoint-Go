@@ -1,6 +1,7 @@
 package sharepoint
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"reflect"
@@ -18,7 +19,7 @@ type Session struct {
 	User   *UserMetadata
 }
 
-func Init(configFile []byte) (*Session, error) {
+func Init(configFile []byte, ctx context.Context) (*Session, error) {
 	auth := &ondemand.AuthCnfg{}
 
 	err := auth.ParseConfig(configFile)
@@ -26,6 +27,8 @@ func Init(configFile []byte) (*Session, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Unable to get config: %v\n", err)
 	}
+
+	auth.Ctx = ctx
 
 	client := &gosip.SPClient{AuthCnfg: auth}
 

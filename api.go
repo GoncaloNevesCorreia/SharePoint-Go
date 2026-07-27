@@ -515,9 +515,7 @@ func GetSessionMetadata(siteURL string, client *gosip.SPClient) (*UserMetadata, 
 
 	httpClient := api.NewHTTPClient(client)
 
-	data, err := withRetry(func() ([]byte, error) {
-		return httpClient.Post(endpoint, nil, nil)
-	})
+	data, err := httpClient.Post(endpoint, nil, nil)
 
 	if err != nil {
 		return nil, err

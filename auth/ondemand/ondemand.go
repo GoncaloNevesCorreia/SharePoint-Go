@@ -18,6 +18,7 @@ var (
 )
 
 type AuthCnfg struct {
+	Ctx     context.Context
 	SiteURL string `json:"siteUrl"` // SPSite or SPWeb URL, which is the context target for the API calls
 }
 
@@ -37,7 +38,7 @@ func (c *AuthCnfg) GetAuth() (string, int64, error) {
 		return cookies.toString(), cookies.getExpire(), nil
 	}
 
-	cookies, err := c.loadCookies(context.Background())
+	cookies, err := c.loadCookies()
 	if err != nil {
 		return "", 0, err
 	}
