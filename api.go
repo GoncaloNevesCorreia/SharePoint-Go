@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/koltyakov/gosip"
 	"github.com/koltyakov/gosip/api"
 )
 
@@ -123,9 +122,10 @@ func (list *SharePointList[T]) GetAll() ([]*T, error) {
 
 	result, err := withRetry(func() ([]api.ItemResp, error) {
 		return items.GetAll()
-	})
+	}, list.auth.CleanCookieCache)
 
 	if err != nil {
+
 		return nil, fmt.Errorf("Não foi possivel aceder à lista '%s': %v\n", list.listURI, err)
 	}
 
@@ -149,7 +149,7 @@ func (list *SharePointList[T]) GetAllPaged() ([]*T, error) {
 
 	response, err := withRetry(func() (*SearchResponse[T], error) {
 		return list.Limit(50).Get()
-	})
+	}, list.auth.CleanCookieCache)
 
 	if err != nil {
 		return nil, err
@@ -187,7 +187,7 @@ func (list *SharePointList[T]) Get() (*SearchResponse[T], error) {
 
 	page, err := withRetry(func() (*api.ItemsPage, error) {
 		return items.GetPaged()
-	})
+	}, list.auth.CleanCookieCache)
 
 	list.clearFilters()
 
@@ -211,7 +211,7 @@ func (list *SharePointList[T]) Next() (*SearchResponse[T], error) {
 
 	nextPage, err := withRetry(func() (*api.ItemsPage, error) {
 		return list.page.GetNextPage()
-	})
+	}, list.auth.CleanCookieCache)
 
 	if err != nil {
 		return nil, fmt.Errorf("Não foi possivel aceder à lista '%s': %v\n", list.listURI, err)
@@ -232,7 +232,7 @@ func (list *SharePointList[T]) GetByID(itemId int) (*T, error) {
 
 	data, err := withRetry(func() (api.ItemResp, error) {
 		return items.GetByID(itemId).Get()
-	})
+	}, list.auth.CleanCookieCache)
 
 	if err != nil {
 		return nil, fmt.Errorf("Não foi possivel aceder à lista '%s': %v\n", list.listURI, err)
@@ -257,7 +257,7 @@ func (list *SharePointList[T]) GetFile(itemId int, fileName string) ([]byte, err
 
 	data, err := withRetry(func() ([]byte, error) {
 		return items.GetByID(itemId).Attachments().GetByName(fileName).Download()
-	})
+	}, list.auth.CleanCookieCache)
 
 	if err != nil {
 		return nil, fmt.Errorf("Não foi possivel aceder à lista '%s': %v\n", list.listURI, err)
@@ -283,7 +283,7 @@ func (list *SharePointList[T]) Add() (*T, error) {
 
 	data, err := withRetry(func() (api.ItemResp, error) {
 		return items.Add(payload)
-	})
+	}, list.auth.CleanCookieCache)
 
 	if err != nil {
 		return nil, fmt.Errorf("Não foi possivel adicionar à lista '%s': %v\n", list.listURI, err)
@@ -334,7 +334,7 @@ func (list *SharePointList[T]) Update(itemId int) error {
 
 	_, err = withRetry(func() (api.ItemResp, error) {
 		return item.Update(payload)
-	})
+	}, list.auth.CleanCookieCache)
 
 	if err != nil {
 		return fmt.Errorf("Não foi possivel atualizar a lista '%s': %v\n", list.listURI, err)
@@ -373,7 +373,7 @@ func (list *SharePointList[T]) Delete(itemId int) (string, error) {
 
 	data, err := withRetry(func() ([]byte, error) {
 		return httpClient.Post(endpoint, nil, nil)
-	})
+	}, list.auth.CleanCookieCache)
 
 	if err != nil {
 		return "", fmt.Errorf("Não foi possivel apagar da lista '%s': %v\n", list.listURI, err)
@@ -400,7 +400,7 @@ func (list *SharePointList[T]) Delete(itemId int) (string, error) {
 func (list *SharePointList[T]) Restore(GUID string) error {
 	return withRetryNoData(func() error {
 		return list.api.Web().RecycleBin().GetByID(GUID).Restore()
-	})
+	}, list.auth.CleanCookieCache)
 }
 
 func (list *SharePointList[T]) getItems() *api.Items {
@@ -509,13 +509,15 @@ func (list *SharePointList[T]) GetUserData() UserMetadata {
 	return *list.user
 }
 
-func GetSessionMetadata(siteURL string, client *gosip.SPClient) (*UserMetadata, error) {
+func GetSessionMetadata(session *Session) (*UserMetadata, error) {
 
-	endpoint := fmt.Sprintf("%s/_api/SP.Directory.DirectorySession/me?$select=id,displayName,mail", siteURL)
+	endpoint := fmt.Sprintf("%s/_api/SP.Directory.DirectorySession/me?$select=id,displayName,mail", session.Auth.SiteURL)
 
-	httpClient := api.NewHTTPClient(client)
+	data, err := withRetry(func() ([]byte, error) {
+		httpClient := api.NewHTTPClient(session.Client)
 
-	data, err := httpClient.Post(endpoint, nil, nil)
+		return httpClient.Post(endpoint, nil, nil)
+	}, session.Auth.CleanCookieCache)
 
 	if err != nil {
 		return nil, err

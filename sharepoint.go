@@ -14,6 +14,7 @@ import (
 )
 
 type Session struct {
+	Auth   *ondemand.AuthCnfg
 	Client *gosip.SPClient
 	SP     *api.SP
 	User   *UserMetadata
@@ -35,6 +36,7 @@ func Init(configFile []byte, ctx context.Context) (*Session, error) {
 	sp := api.NewSP(client)
 
 	return &Session{
+		Auth:   auth,
 		Client: client,
 		SP:     sp,
 	}, nil
@@ -78,6 +80,7 @@ type UserMetadata struct {
 type SharePointList[T any] struct {
 	user       *UserMetadata
 	client     *gosip.SPClient
+	auth       *ondemand.AuthCnfg
 	api        *api.SP
 	page       *api.ItemsPage
 	listURI    string
@@ -94,6 +97,7 @@ func NewEndpoint[T any](session *Session, listURI string) *SharePointList[T] {
 		user:    session.User,
 		client:  session.Client,
 		api:     session.SP,
+		auth:    session.Auth,
 		listURI: listURI,
 		columns: columns,
 		options: options{
@@ -138,15 +142,15 @@ func getColumns[T any]() map[string]string {
 	return columns
 }
 
-func withRetryNoData(operation func() error) error {
+func withRetryNoData(operation func() error, clearSession func() error) error {
 	_, err := withRetry(func() (any, error) {
 		return nil, operation()
-	})
+	}, clearSession)
 
 	return err
 }
 
-func withRetry[T any](operation func() (T, error)) (T, error) {
+func withRetry[T any](operation func() (T, error), clearSession func() error) (T, error) {
 	attempts := 3
 	delay := 2 * time.Second
 
@@ -163,6 +167,9 @@ func withRetry[T any](operation func() (T, error)) (T, error) {
 		if strings.Contains(err.Error(), "404 Not Found") {
 
 			return result, nil
+		} else if strings.Contains(err.Error(), "401 Unauthorized") || strings.Contains(err.Error(), "403 Forbidden") {
+
+			clearSession()
 		}
 
 		log.Printf("Operation failed (attempt %d/%d): %v", i, attempts, err)
