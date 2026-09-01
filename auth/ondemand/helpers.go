@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/chromedp/cdproto/browser"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
@@ -213,6 +214,8 @@ func Login(URL string, headless bool) (*Cookies, error) {
 			chromedp.ActionFunc(func(ctx context.Context) error {
 				ticker := time.NewTicker(500 * time.Millisecond)
 
+				isMinimised := false
+
 				defer ticker.Stop()
 
 				for {
@@ -229,6 +232,27 @@ func Login(URL string, headless bool) (*Cookies, error) {
 						if strings.HasPrefix(currentURL, URL) {
 							return nil
 						}
+
+						if !isMinimised &&
+							!strings.HasPrefix(currentURL, "https://login.microsoftonline.com") &&
+							!strings.HasPrefix(currentURL, "https://login.microsoft.com") &&
+							!strings.HasPrefix(currentURL, "https://accounts.google.com/v3/signin") &&
+							!strings.HasPrefix(currentURL, "https://appleid.apple.com/auth/authorize") {
+							windowID, _, err := browser.GetWindowForTarget().Do(ctx)
+
+							if err != nil {
+								return err
+							}
+
+							// Apply the minimized state to the window bounds
+							bounds := &browser.Bounds{
+								WindowState: browser.WindowStateMinimized,
+							}
+
+							browser.SetWindowBounds(windowID, bounds).Do(ctx)
+
+							isMinimised = true
+						}
 					}
 				}
 			}),
@@ -242,7 +266,7 @@ func Login(URL string, headless bool) (*Cookies, error) {
 	foundCookies := &Cookies{}
 
 	err = chromedp.Run(ctx,
-
+		chromedp.WaitReady("body", chromedp.ByQuery),
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			cookies, err := network.GetCookies().
 				WithURLs([]string{URL}).
@@ -388,10 +412,11 @@ var defaultFlags = []string{
 
 	"--metrics-recording-only",
 	"--safebrowsing-disable-auto-update",
-	"--enable-automation",
+	// "--enable-automation",
 
 	"--password-store=basic",
 	"--use-mock-keychain",
 
 	"--disable-component-update",
+	"--disable-infobars",
 }
