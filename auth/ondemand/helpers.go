@@ -35,6 +35,8 @@ const SharepointProcessAppID = "sharepoint-app-automation-v1"
 const DebugPort = "9732"
 
 const USER_REQUIRED_ERROR = "USER_INTERACTION_REQUIRED"
+const USER_CLOSED_BROWSER = "USER_CLOSED_BROWSER"
+const USER_LOGIN_TIMEOUT = "USER_LOGIN_TIMEOUT"
 
 func (c *AuthCnfg) cacheCookieToDisk(cookies *Cookies) error {
 	tmpDir := filepath.Join(os.TempDir(), "gosip")
@@ -102,12 +104,16 @@ func (c *AuthCnfg) loadCookies() (*Cookies, error) {
 	if err != nil {
 
 		if err.Error() == USER_REQUIRED_ERROR {
-			runtime.EventsEmit(c.Ctx, USER_REQUIRED_ERROR)
+			runtime.EventsEmit(c.Ctx, "LOGIN_EVENT", USER_REQUIRED_ERROR)
 
 			// Fluxo de login manual
 			foundCookies, err = Login(c.SiteURL, false)
 
 			if err != nil {
+				if err.Error() == USER_LOGIN_TIMEOUT {
+					runtime.EventsEmit(c.Ctx, "LOGIN_EVENT", USER_LOGIN_TIMEOUT)
+				}
+
 				return nil, err
 			}
 
@@ -195,7 +201,7 @@ func Login(URL string, headless bool) (*Cookies, error) {
 	)
 
 	if err != nil {
-		return nil, err
+		return nil, standardizeError(err)
 	}
 
 	if !strings.HasPrefix(currentURL, URL) {
@@ -229,7 +235,7 @@ func Login(URL string, headless bool) (*Cookies, error) {
 		)
 
 		if err != nil {
-			return nil, err
+			return nil, standardizeError(err)
 		}
 	}
 
@@ -261,7 +267,7 @@ func Login(URL string, headless bool) (*Cookies, error) {
 	)
 
 	if err != nil {
-		return nil, err
+		return nil, standardizeError(err)
 	}
 
 	return foundCookies, nil
@@ -319,10 +325,9 @@ func cleanUp(userDataDir string) {
 
 	time.Sleep(200 * time.Millisecond)
 
-	var err error
-
 	for range 5 {
-		err = os.RemoveAll(userDataDir)
+		err := os.RemoveAll(userDataDir)
+
 		if err == nil {
 			return
 		}
@@ -340,6 +345,19 @@ func clearPendingProcess() {
 
 	if err := cmd.Run(); err != nil {
 		log.Printf("failed to clear pending process: %v", err)
+	}
+}
+
+func standardizeError(err error) error {
+	switch err.Error() {
+	case "context deadline exceeded":
+		return fmt.Errorf(USER_LOGIN_TIMEOUT)
+	case "context canceled":
+		return fmt.Errorf(USER_CLOSED_BROWSER)
+	case "page load error net::ERR_ABORTED":
+		return fmt.Errorf(USER_CLOSED_BROWSER)
+	default:
+		return err
 	}
 }
 

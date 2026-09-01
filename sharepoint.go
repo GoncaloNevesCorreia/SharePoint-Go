@@ -170,6 +170,8 @@ func withRetry[T any](operation func() (T, error), clearSession func() error) (T
 		} else if strings.Contains(err.Error(), "401 Unauthorized") || strings.Contains(err.Error(), "403 Forbidden") {
 
 			clearSession()
+		} else if strings.Contains(err.Error(), "USER_LOGIN_TIMEOUT") || strings.Contains(err.Error(), "USER_CLOSED_BROWSER")  {
+			return result, err
 		}
 
 		log.Printf("Operation failed (attempt %d/%d): %v", i, attempts, err)
