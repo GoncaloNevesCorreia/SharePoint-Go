@@ -18,6 +18,7 @@ import (
 
 	"github.com/chromedp/cdproto/browser"
 	"github.com/chromedp/cdproto/network"
+	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -38,6 +39,7 @@ const DebugPort = "9732"
 const USER_REQUIRED_ERROR = "USER_INTERACTION_REQUIRED"
 const USER_CLOSED_BROWSER = "USER_CLOSED_BROWSER"
 const USER_LOGIN_TIMEOUT = "USER_LOGIN_TIMEOUT"
+const RESTRICTED_ACCOUNT = "RESTRICTED_ACCOUNT"
 
 func (c *AuthCnfg) cacheCookieToDisk(cookies *Cookies) error {
 	tmpDir := filepath.Join(os.TempDir(), "gosip")
@@ -100,34 +102,30 @@ func (c *AuthCnfg) getCookieDiskCache() (*Cookies, error) {
 func (c *AuthCnfg) loadCookies() (*Cookies, error) {
 
 	// Fluxo de login automático
-	foundCookies, err := Login(c.SiteURL, true)
+	foundCookies, err := Login(c.Ctx, c.SiteURL, true)
+
+	err = standardizeError(c.Ctx, err)
 
 	if err != nil {
 
 		if err.Error() == USER_REQUIRED_ERROR {
-			runtime.EventsEmit(c.Ctx, "LOGIN_EVENT", USER_REQUIRED_ERROR)
 
 			// Fluxo de login manual
-			foundCookies, err = Login(c.SiteURL, false)
+			foundCookies, err = Login(c.Ctx, c.SiteURL, false)
 
 			if err != nil {
-				if err.Error() == USER_LOGIN_TIMEOUT {
-					runtime.EventsEmit(c.Ctx, "LOGIN_EVENT", USER_LOGIN_TIMEOUT)
-				}
-
-				return nil, err
+				return nil, standardizeError(c.Ctx, err)
 			}
 
 		} else {
 			return nil, err
 		}
-
 	}
 
 	return foundCookies, nil
 }
 
-func Login(URL string, headless bool) (*Cookies, error) {
+func Login(parentCtx context.Context, URL string, headless bool) (*Cookies, error) {
 	edge, edgeNotFoundError := getEdgePath()
 
 	if edgeNotFoundError != nil {
@@ -176,7 +174,7 @@ func Login(URL string, headless bool) (*Cookies, error) {
 		return nil, err
 	}
 
-	allocCtx, cancel := chromedp.NewRemoteAllocator(context.Background(), devToolsTarget.WebSocketDebuggerUrl)
+	allocCtx, cancel := chromedp.NewRemoteAllocator(parentCtx, devToolsTarget.WebSocketDebuggerUrl)
 	defer cancel()
 
 	pageCtx, cancelCtx := chromedp.NewContext(allocCtx, chromedp.WithTargetID(target.ID(devToolsTarget.ID)))
@@ -193,16 +191,22 @@ func Login(URL string, headless bool) (*Cookies, error) {
 	// 	chromedp.Navigate(AuthURL),
 	// 	chromedp.WaitReady("body", chromedp.ByQuery),
 	// 	chromedp.Location(&currentURL),
+	// 	chromedp.ActionFunc(func(ctx context.Context) error {
+	// 		return page.BringToFront().Do(ctx)
+	// 	}),
 	// )
 
 	_, err = chromedp.RunResponse(ctx,
 		chromedp.Navigate(URL),
 		chromedp.WaitReady("body", chromedp.ByQuery),
 		chromedp.Location(&currentURL),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			return page.BringToFront().Do(ctx)
+		}),
 	)
 
 	if err != nil {
-		return nil, standardizeError(err)
+		return nil, standardizeError(parentCtx, err)
 	}
 
 	if !strings.HasPrefix(currentURL, URL) {
@@ -259,7 +263,7 @@ func Login(URL string, headless bool) (*Cookies, error) {
 		)
 
 		if err != nil {
-			return nil, standardizeError(err)
+			return nil, standardizeError(parentCtx, err)
 		}
 	}
 
@@ -283,7 +287,7 @@ func Login(URL string, headless bool) (*Cookies, error) {
 			}
 
 			if foundCookies.isEmpty() {
-				return fmt.Errorf("cookies %q not found for %s", cookieNames, URL)
+				return fmt.Errorf(RESTRICTED_ACCOUNT)
 			}
 
 			return nil
@@ -291,7 +295,7 @@ func Login(URL string, headless bool) (*Cookies, error) {
 	)
 
 	if err != nil {
-		return nil, standardizeError(err)
+		return nil, standardizeError(parentCtx, err)
 	}
 
 	return foundCookies, nil
@@ -372,14 +376,32 @@ func clearPendingProcess() {
 	}
 }
 
-func standardizeError(err error) error {
+func standardizeError(ctx context.Context, err error) error {
+	if err == nil {
+		return nil
+	}
+
 	switch err.Error() {
+	case RESTRICTED_ACCOUNT:
+		runtime.EventsEmit(ctx, "LOGIN_EVENT", RESTRICTED_ACCOUNT)
+		return err
+
+	case USER_REQUIRED_ERROR:
+		runtime.EventsEmit(ctx, "LOGIN_EVENT", USER_REQUIRED_ERROR)
+		return err
+
 	case "context deadline exceeded":
+		runtime.EventsEmit(ctx, "LOGIN_EVENT", USER_LOGIN_TIMEOUT)
 		return fmt.Errorf(USER_LOGIN_TIMEOUT)
+
 	case "context canceled":
+		runtime.EventsEmit(ctx, "LOGIN_EVENT", USER_CLOSED_BROWSER)
 		return fmt.Errorf(USER_CLOSED_BROWSER)
+
 	case "page load error net::ERR_ABORTED":
+		runtime.EventsEmit(ctx, "LOGIN_EVENT", USER_CLOSED_BROWSER)
 		return fmt.Errorf(USER_CLOSED_BROWSER)
+
 	default:
 		return err
 	}

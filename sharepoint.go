@@ -170,7 +170,7 @@ func withRetry[T any](operation func() (T, error), clearSession func() error) (T
 		} else if strings.Contains(err.Error(), "401 Unauthorized") || strings.Contains(err.Error(), "403 Forbidden") {
 
 			clearSession()
-		} else if strings.Contains(err.Error(), "USER_LOGIN_TIMEOUT") || strings.Contains(err.Error(), "USER_CLOSED_BROWSER")  {
+		} else if strings.Contains(err.Error(), "USER_LOGIN_TIMEOUT") || strings.Contains(err.Error(), "USER_CLOSED_BROWSER") || strings.Contains(err.Error(), "RESTRICTED_ACCOUNT") {
 			return result, err
 		}
 
