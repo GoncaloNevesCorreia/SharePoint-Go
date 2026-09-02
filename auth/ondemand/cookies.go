@@ -70,7 +70,7 @@ func (cookie *Cookie) isExpired() bool {
 	}
 	sec, dec := math.Modf(cookie.Expires)
 	expireTime := time.Unix(int64(sec), int64(dec*(1e9)))
-	if time.Now().Add(time.Minute).Before(expireTime) {
+	if time.Now().Add(6 * time.Hour).Before(expireTime) {
 		return false
 	}
 	return true
